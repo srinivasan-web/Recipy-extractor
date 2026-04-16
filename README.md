@@ -1,68 +1,84 @@
 # Recipe Extractor & Meal Planner
 
-A production-leaning starter for the assignment workflow:
+A full-stack app that turns recipe URLs into structured data you can search, review, and reuse.
 
-`React -> FastAPI -> Scraper -> Gemini via LangChain -> SQLAlchemy/PostgreSQL`
+Stack:
 
-The repo is scaffolded to handle the full pipeline:
+`React + Vite -> FastAPI -> scraper/parser services -> Gemini -> SQLAlchemy`
 
-1. Accept a recipe URL from the frontend
-2. Scrape the page and normalize readable text
-3. Ask Gemini for structured JSON with strict prompts
-4. Cache repeated URLs in the database
-5. Return the structured recipe and render it in the UI
-6. Store image-rich metadata, summaries, and source domains for a more browsable recipe library
+## What it does
 
-## Repo layout
+1. Accepts a recipe URL from the frontend.
+2. Scrapes the page and extracts readable content.
+3. Sends the cleaned content to Gemini for structured recipe output.
+4. Stores the result for later reuse.
+5. Shows history, dashboard stats, and recipe details in the UI.
+
+## Project structure
 
 ```text
-backend/
-frontend/
-prompts/
-sample_data/
-render.yaml
-README.md
+backend/       FastAPI app, scraping, parsing, persistence
+frontend/      React + Vite client
+prompts/       Prompt templates used by the LLM flow
+sample_data/   Example URLs and sample response data
+tests/         Backend end-to-end tests
+render.yaml    Backend deployment config
 ```
 
-## Backend setup
+## Local setup
 
-```bash
+### 1. Create a virtual environment
+
+```powershell
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
-copy backend\.env.example backend\.env
-uvicorn backend.main:app --reload
 ```
 
-Important environment variables:
+### 2. Install backend dependencies
 
-- `DATABASE_URL=postgresql://recipe_user:recipe_pass@localhost:5432/recipe_planner`
-- `GEMINI_API_KEY=your_google_ai_api_key`
+```powershell
+pip install -r requirements.txt
+```
+
+The root `requirements.txt` points to [backend/requirements.txt](backend/requirements.txt), so one install command is enough.
+
+### 3. Add backend environment values
+
+```powershell
+copy backend\.env.example backend\.env
+```
+
+Important variables:
+
+- `GEMINI_API_KEY`
 - `GEMINI_MODEL=gemini-2.5-flash`
-- `LLM_MAX_RETRIES=3`
-- `LLM_RETRY_BACKOFF_SECONDS=1`
+- `DATABASE_URL`
+- `LLM_MAX_RETRIES`
+- `LLM_RETRY_BACKOFF_SECONDS`
 
 Notes:
 
-- The backend loads environment variables from either the repo root `.env` or `backend/.env`.
-- `postgres://...` and `postgresql://...` URLs are normalized automatically to SQLAlchemy's `postgresql+psycopg://...` format.
-- The backend defaults to a shared in-memory SQLite database so the scaffold can boot locally without PostgreSQL.
-- Local extraction history persists for the lifetime of the running backend process; set `DATABASE_URL` to PostgreSQL for durable storage.
-- For the real assignment submission, switch `DATABASE_URL` to PostgreSQL.
+- The backend can read env values from either `.env` in the project root or `backend/.env`.
+- PostgreSQL URLs are normalized automatically for SQLAlchemy.
+- If `DATABASE_URL` is not set, the app can still boot locally with SQLite-based development defaults.
 
-## PostgreSQL setup
+### 4. Start the backend
 
-Use Supabase or Railway for the real submission.
+From the project root:
 
-1. Create a hosted PostgreSQL database.
-2. Copy the connection string into `DATABASE_URL`.
-3. Run the SQL in [backend/database/schema.sql](backend/database/schema.sql) if you want to provision the table manually.
+```powershell
+python -m uvicorn backend.main:app --reload
+```
 
-The app can also create the table automatically on startup through SQLAlchemy.
+If you are already inside `backend/`, use:
 
-## Frontend setup
+```powershell
+python -m uvicorn main:app --reload
+```
 
-```bash
+### 5. Start the frontend
+
+```powershell
 cd frontend
 npm install
 npm run dev
@@ -70,13 +86,13 @@ npm run dev
 
 Optional frontend env:
 
-```bash
+```text
 VITE_API_BASE=http://localhost:8000/api
 ```
 
-The matching example file is [frontend/.env.example](frontend/.env.example).
+The example file is [frontend/.env.example](frontend/.env.example).
 
-## API endpoints
+## API routes
 
 - `POST /api/extract`
 - `GET /api/recipes`
@@ -84,43 +100,37 @@ The matching example file is [frontend/.env.example](frontend/.env.example).
 - `GET /api/dashboard`
 - `GET /api/health`
 
-`GET /api/health` also verifies database connectivity, which is useful during deployment checks.
+`GET /api/health` also checks database connectivity.
 
-## LLM strategy
+## Prompt files
 
-Prompts are split into dedicated files in [`prompts/`](prompts):
+Prompt templates live in [prompts](prompts):
 
 - `recipe_extraction.txt`
 - `nutrition.txt`
 - `substitutions.txt`
 - `shopping_list.txt`
 
-This keeps the core extraction focused while allowing targeted enrichment passes and easier prompt iteration during interviews.
-
-Gemini calls use retry/backoff and JSON parsing safeguards so transient provider failures or malformed responses do not immediately crash the request flow.
-
-## Advanced features included
-
-Repeated URLs are cached. If a recipe URL already exists in the database, the backend returns the stored record instead of scraping and invoking Gemini again.
-
-The app now also stores image URLs, source domains, and generated summaries so the frontend can provide a faster, more visual dashboard experience with searchable history cards and overview metrics.
+This keeps extraction behavior easy to update without mixing prompt text into application code.
 
 ## Deployment
 
-### Backend on Render
+### Backend
 
-- A starter Render config is included in [render.yaml](render.yaml).
-- Set `DATABASE_URL`, `GEMINI_API_KEY`, and `GEMINI_MODEL` in Render.
-- The service starts with `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
+- Use [render.yaml](render.yaml) as the starter config.
+- Set `DATABASE_URL`, `GEMINI_API_KEY`, and `GEMINI_MODEL` in your hosting environment.
+- Start command:
 
-### Frontend on Vercel
+```text
+uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+```
 
-- Import the `frontend/` directory as the Vercel project root.
-- Set `VITE_API_BASE` to your deployed backend URL plus `/api`.
-- Run the frontend build with `npm run build`.
+### Frontend
+
+- Deploy the `frontend/` folder.
+- Set `VITE_API_BASE` to your backend URL plus `/api`.
+- Build with `npm run build`.
 
 ## Sample data
 
-Sample URLs and a mock response shape live in [`sample_data/`](sample_data).
-
-# Recipy-extractor
+Example URLs and a sample response are in [sample_data](sample_data).

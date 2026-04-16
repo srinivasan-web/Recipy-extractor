@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+*.egg-info/
 *.pyc
 *.pyo
 *.pyd
@@ -8,6 +9,9 @@ __pycache__/
 *.db-journal
 *.log
 .env
+.qodo/
+.sixth/
+.DS_Store
 backend/.env
 frontend/node_modules/
 frontend/dist/
