@@ -19,6 +19,7 @@ try:
         build_manual_source_url,
     )
     from ..services.llm import LLMServiceError, extract_recipe_bundle
+    from ..services.llm import LLMTemporaryServiceError
     from ..services.parser import normalize_recipe_payload
     from ..services.scraper import ScrapedPage, ScraperError, scrape_recipe_page
 except ImportError:  # pragma: no cover - supports running from backend/ as main:app
@@ -34,6 +35,7 @@ except ImportError:  # pragma: no cover - supports running from backend/ as main
         build_manual_source_url,
     )
     from services.llm import LLMServiceError, extract_recipe_bundle
+    from services.llm import LLMTemporaryServiceError
     from services.parser import normalize_recipe_payload
     from services.scraper import ScrapedPage, ScraperError, scrape_recipe_page
 
@@ -172,6 +174,11 @@ def extract_recipe(request: ExtractRequest, db: Session = Depends(get_db)) -> Re
 
     try:
         llm_payload = extract_recipe_bundle(source_text)
+    except LLMTemporaryServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except LLMServiceError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
