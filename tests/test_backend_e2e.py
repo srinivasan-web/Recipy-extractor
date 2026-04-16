@@ -85,6 +85,8 @@ class BackendEndToEndTests(unittest.TestCase):
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("DATABASE_FALLBACK_ENABLED", None)
         os.environ.pop("DATABASE_FALLBACK_URL", None)
+        os.environ.pop("CORS_ALLOWED_ORIGINS", None)
+        os.environ.pop("CORS_ALLOWED_ORIGIN_REGEX", None)
         clear_backend_modules()
 
     def test_health_check_and_empty_history(self) -> None:
@@ -254,6 +256,26 @@ class BackendEndToEndTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["database_mode"], "fallback-sqlite")
+
+    def test_cors_allows_configured_vercel_origin(self) -> None:
+        os.environ["CORS_ALLOWED_ORIGINS"] = "https://recipy-extractor-sl4n.vercel.app"
+        clear_backend_modules()
+        backend_main = importlib.import_module("backend.main")
+
+        with TestClient(backend_main.app) as client:
+            response = client.options(
+                "/api/extract",
+                headers={
+                    "Origin": "https://recipy-extractor-sl4n.vercel.app",
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers.get("access-control-allow-origin"),
+            "https://recipy-extractor-sl4n.vercel.app",
+        )
 
 
 if __name__ == "__main__":

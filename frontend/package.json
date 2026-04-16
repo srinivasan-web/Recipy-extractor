@@ -2,6 +2,7 @@
   "name": "recipe-extractor-frontend",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "npm@10",
   "type": "module",
   "scripts": {
     "dev": "vite",

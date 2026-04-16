@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     database_url: str = DEFAULT_SQLITE_URL
     database_fallback_enabled: bool = True
     database_fallback_url: str | None = None
+    cors_allowed_origins: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173,"
+        "http://localhost:5174,"
+        "http://127.0.0.1:5174"
+    )
+    cors_allowed_origin_regex: str = r"https://.*\.vercel\.app"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
     request_timeout_seconds: int = 20
@@ -39,6 +46,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    def cors_origins_list(self) -> list[str]:
+        return [item.strip() for item in self.cors_allowed_origins.split(",") if item.strip()]
 
 
 @lru_cache
