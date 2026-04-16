@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
     gemini_fallback_model: str | None = None
+    llm_fallback_to_parser: bool = True
     request_timeout_seconds: int = 20
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     llm_max_retries: int = 3

@@ -19,6 +19,15 @@ NUTRITION_KEYS = (
     "sodium",
 )
 
+INGREDIENT_HEADINGS = ("ingredients", "ingredient")
+INSTRUCTION_HEADINGS = ("instructions", "method", "directions", "steps", "preparation")
+CLOCK_PATTERNS = {
+    "prep_time": r"prep(?:aration)?\s*time[:\s]+([^\n,;]+)",
+    "cook_time": r"cook(?:ing)?\s*time[:\s]+([^\n,;]+)",
+    "total_time": r"total\s*time[:\s]+([^\n,;]+)",
+    "servings": r"(?:serves|servings|yield)[:\s]+([^\n,;]+)",
+}
+
 
 def parse_json_response(raw_text: str) -> dict[str, Any]:
     text = raw_text.strip()
@@ -37,6 +46,135 @@ def parse_json_response(raw_text: str) -> dict[str, Any]:
             continue
 
     raise LLMParsingError("Model response did not contain valid JSON.")
+
+
+def lines_from_text(raw_text: str) -> list[str]:
+    return [line.strip(" -*\t\r") for line in raw_text.splitlines() if line.strip()]
+
+
+def looks_like_heading(line: str, headings: tuple[str, ...]) -> bool:
+    lowered = line.lower().strip(":")
+    return lowered in headings
+
+
+def find_section(lines: list[str], headings: tuple[str, ...], stop_headings: tuple[str, ...]) -> list[str]:
+    start_index = None
+    for index, line in enumerate(lines):
+        if looks_like_heading(line, headings):
+            start_index = index + 1
+            break
+
+    if start_index is None:
+        return []
+
+    collected: list[str] = []
+    for line in lines[start_index:]:
+        if looks_like_heading(line, stop_headings):
+            break
+        collected.append(line)
+    return collected
+
+
+def infer_title(lines: list[str]) -> str | None:
+    if not lines:
+        return None
+
+    first = lines[0]
+    if ":" in first and first.lower().startswith("title"):
+        return first.split(":", 1)[1].strip() or None
+    return first[:255]
+
+
+def infer_summary(lines: list[str], title: str | None) -> str | None:
+    for line in lines[1:6]:
+        if len(line.split()) >= 6 and line.lower() != (title or "").lower():
+            return line[:280]
+    return None
+
+
+def infer_scalar(text: str, pattern: str) -> str | None:
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1).strip(" .:")
+
+
+def infer_ingredients(lines: list[str]) -> list[dict[str, Any]]:
+    section = find_section(lines, INGREDIENT_HEADINGS, INSTRUCTION_HEADINGS)
+    source = section or [line for line in lines if re.match(r"^(\d+|¼|½|¾|1/2|1/4|3/4|\d+/\d+)", line)]
+    ingredients: list[dict[str, Any]] = []
+    for line in source[:30]:
+        if looks_like_heading(line, INGREDIENT_HEADINGS + INSTRUCTION_HEADINGS):
+            continue
+        match = re.match(
+            r"^(?P<quantity>\d+(?:[./]\d+)?|\d+\s+\d+/\d+|¼|½|¾)?\s*(?P<unit>[A-Za-z]+)?\s*(?P<item>.+)$",
+            line,
+        )
+        if not match:
+            continue
+        item = match.group("item").strip(" .")
+        if not item:
+            continue
+        ingredients.append(
+            {
+                "quantity": normalize_fraction(match.group("quantity")),
+                "unit": match.group("unit") or None,
+                "item": item,
+            }
+        )
+    return ingredients
+
+
+def normalize_fraction(value: str | None) -> str | None:
+    if not value:
+        return None
+    return value.strip()
+
+
+def infer_instructions(lines: list[str]) -> list[str]:
+    section = find_section(lines, INSTRUCTION_HEADINGS, ())
+    source = section or [line for line in lines if re.match(r"^(step\s*\d+|\d+[.)])", line.lower())]
+    instructions: list[str] = []
+    for line in source[:20]:
+        cleaned = re.sub(r"^(step\s*\d+[:.)-]*|\d+[.)-]\s*)", "", line, flags=re.IGNORECASE).strip()
+        if cleaned:
+            instructions.append(cleaned)
+    if instructions:
+        return instructions
+
+    paragraph_lines = [line for line in lines[1:] if len(line.split()) >= 5]
+    return paragraph_lines[:8]
+
+
+def infer_recipe_from_text(raw_text: str) -> dict[str, Any]:
+    lines = lines_from_text(raw_text)
+    title = infer_title(lines)
+    text = "\n".join(lines)
+    ingredients = infer_ingredients(lines)
+    instructions = infer_instructions(lines)
+
+    payload = {
+        "title": title,
+        "summary": infer_summary(lines, title),
+        "cuisine": None,
+        "prep_time": infer_scalar(text, CLOCK_PATTERNS["prep_time"]),
+        "cook_time": infer_scalar(text, CLOCK_PATTERNS["cook_time"]),
+        "total_time": infer_scalar(text, CLOCK_PATTERNS["total_time"]),
+        "servings": infer_scalar(text, CLOCK_PATTERNS["servings"]),
+        "difficulty": None,
+        "image_url": None,
+        "source_domain": None,
+        "ingredients": ingredients,
+        "instructions": instructions,
+        "nutrition": None,
+        "substitutions": [],
+        "shopping_list": [
+            {"item": item.get("item"), "quantity": item.get("quantity"), "category": "Ingredients"}
+            for item in ingredients
+        ],
+        "related_recipes": [],
+    }
+    return normalize_recipe_payload(payload)
 
 
 def normalize_recipe_payload(payload: dict[str, Any]) -> dict[str, Any]:

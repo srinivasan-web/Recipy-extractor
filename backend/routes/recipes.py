@@ -21,9 +21,11 @@ try:
     from ..services.llm import LLMServiceError, extract_recipe_bundle
     from ..services.llm import LLMQuotaExceededError
     from ..services.llm import LLMTemporaryServiceError
-    from ..services.parser import normalize_recipe_payload
+    from ..services.parser import infer_recipe_from_text, normalize_recipe_payload
+    from ..database.config import get_settings
     from ..services.scraper import ScrapedPage, ScraperError, scrape_recipe_page
 except ImportError:  # pragma: no cover - supports running from backend/ as main:app
+    from database.config import get_settings
     from database.session import get_database_status, get_db
     from models.recipe import Recipe
     from schemas.recipe import (
@@ -38,10 +40,11 @@ except ImportError:  # pragma: no cover - supports running from backend/ as main
     from services.llm import LLMServiceError, extract_recipe_bundle
     from services.llm import LLMQuotaExceededError
     from services.llm import LLMTemporaryServiceError
-    from services.parser import normalize_recipe_payload
+    from services.parser import infer_recipe_from_text, normalize_recipe_payload
     from services.scraper import ScrapedPage, ScraperError, scrape_recipe_page
 
 router = APIRouter(tags=["recipes"])
+settings = get_settings()
 
 
 def serialize_recipe(recipe: Recipe, *, cached: bool = False) -> RecipeRead:
@@ -86,6 +89,12 @@ def enrich_recipe_payload(source_url: str, payload: dict, scraped_page: ScrapedP
         normalized["title"] = scraped_page.title
 
     return normalized
+
+
+def build_fallback_recipe(source_url: str, source_text: str, scraped_page: ScrapedPage | None) -> dict:
+    payload = infer_recipe_from_text(source_text)
+    payload["summary"] = payload.get("summary") or "Generated with the built-in parser because the AI provider was unavailable."
+    return enrich_recipe_payload(source_url, payload, scraped_page)
 
 
 @router.get("/health", tags=["meta"])
@@ -176,21 +185,25 @@ def extract_recipe(request: ExtractRequest, db: Session = Depends(get_db)) -> Re
 
     try:
         llm_payload = extract_recipe_bundle(source_text)
-    except LLMQuotaExceededError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=str(exc),
-        ) from exc
-    except LLMTemporaryServiceError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except LLMServiceError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        recipe_payload = enrich_recipe_payload(source_url, llm_payload, scraped_page)
+    except (LLMQuotaExceededError, LLMTemporaryServiceError, LLMServiceError) as exc:
+        if not settings.llm_fallback_to_parser:
+            if isinstance(exc, LLMQuotaExceededError):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=str(exc),
+                ) from exc
+            if isinstance(exc, LLMTemporaryServiceError):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=str(exc),
+                ) from exc
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+        recipe_payload = build_fallback_recipe(source_url, source_text, scraped_page)
 
     try:
-        recipe_in = RecipeCreate(url=source_url, **enrich_recipe_payload(source_url, llm_payload, scraped_page))
+        recipe_in = RecipeCreate(url=source_url, **recipe_payload)
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

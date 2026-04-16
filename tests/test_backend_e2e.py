@@ -231,6 +231,40 @@ class BackendEndToEndTests(unittest.TestCase):
         self.assertIn("summary", search_results[0])
         self.assertIn("image_url", search_results[0])
 
+    def test_extract_falls_back_to_builtin_parser_when_llm_is_unavailable(self) -> None:
+        from backend.services.llm import LLMServiceError
+
+        with patch(
+            "backend.routes.recipes.extract_recipe_bundle",
+            side_effect=LLMServiceError("403 PERMISSION_DENIED"),
+        ):
+            response = self.client.post(
+                "/api/extract",
+                json={
+                    "raw_text": (
+                        "Simple Pancakes\n"
+                        "Prep time: 10 minutes\n"
+                        "Cook time: 15 minutes\n"
+                        "Serves: 4\n"
+                        "Ingredients\n"
+                        "2 cups flour\n"
+                        "2 eggs\n"
+                        "1 cup milk\n"
+                        "Instructions\n"
+                        "1. Mix the ingredients.\n"
+                        "2. Cook on a hot pan."
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["title"], "Simple Pancakes")
+        self.assertEqual(body["prep_time"], "10 minutes")
+        self.assertEqual(body["servings"], "4")
+        self.assertGreaterEqual(len(body["ingredients"]), 2)
+        self.assertGreaterEqual(len(body["instructions"]), 2)
+
     def test_startup_falls_back_to_sqlite_when_primary_database_is_unreachable(self) -> None:
         os.environ["DATABASE_URL"] = "postgresql://user:pass@db.example.com:5432/recipes"
         os.environ["DATABASE_FALLBACK_ENABLED"] = "true"
