@@ -1,5 +1,5 @@
 const API_BASE =
-  import.meta.env.VITE_API_BASE || "https://recipy-extractor.onrender.com/api";
+  import.meta.env.VITE_API_BASE || "https://recipy-extractor-2.onrender.com/api";
 
 const blockedScrapeIndicators = [
   "payment required",
