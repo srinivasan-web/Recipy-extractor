@@ -1,0 +1,22 @@
+Convert the structured recipe JSON below into a grouped shopping list.
+
+Rules:
+- Return STRICT JSON only.
+- Consolidate duplicate items when possible.
+- Use broad grocery categories like Produce, Dairy, Meat, Pantry, Spices, Bakery, Frozen.
+- Keep quantity as a short string when known, otherwise null.
+
+Return this exact shape:
+{
+  "shopping_list": [
+    {
+      "item": null,
+      "quantity": null,
+      "category": null
+    }
+  ]
+}
+
+Recipe JSON:
+{recipe_json}
+

@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+*.db-journal
+*.log
+.env
+backend/.env
+frontend/node_modules/
+frontend/dist/
+backend/runtime/
+backend/.test_dbs/

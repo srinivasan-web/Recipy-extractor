@@ -1,0 +1,12 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.35.0
+sqlalchemy>=2.0.40
+psycopg[binary]>=3.2.6
+requests>=2.32.0
+beautifulsoup4>=4.13.0
+langchain>=0.3.25
+langchain-google-genai>=2.1.4
+pydantic-settings>=2.9.0
+python-dotenv>=1.1.0
+selenium>=4.30.0
+undetected-chromedriver>=3.5.5

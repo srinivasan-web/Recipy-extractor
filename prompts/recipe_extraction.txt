@@ -1,0 +1,38 @@
+Extract structured recipe data from the raw page content below.
+
+Rules:
+- Return STRICT JSON only. No markdown. No explanations.
+- Do not hallucinate missing values.
+- If a field is not present, return null.
+- Keep instructions as an ordered array of concise strings.
+- Ingredients must be split into:
+  quantity, unit, item
+- If quantity or unit is not obvious, set them to null.
+- related_recipes should only include recipes explicitly mentioned in the content.
+
+Return this exact JSON shape:
+{
+  "title": null,
+  "cuisine": null,
+  "prep_time": null,
+  "cook_time": null,
+  "total_time": null,
+  "servings": null,
+  "difficulty": null,
+  "ingredients": [
+    {
+      "quantity": null,
+      "unit": null,
+      "item": null
+    }
+  ],
+  "instructions": [],
+  "nutrition": null,
+  "substitutions": [],
+  "shopping_list": [],
+  "related_recipes": []
+}
+
+Recipe content:
+{recipe_text}
+

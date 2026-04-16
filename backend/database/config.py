@@ -1,0 +1,44 @@
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+DEFAULT_SQLITE_URL = "sqlite+pysqlite:///:memory:"
+
+
+def normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
+class Settings(BaseSettings):
+    app_name: str = "Recipe Extractor & Meal Planner API"
+    api_prefix: str = "/api"
+    database_url: str = DEFAULT_SQLITE_URL
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    request_timeout_seconds: int = 20
+    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    llm_max_retries: int = 3
+    llm_retry_backoff_seconds: int = 1
+    scraper_max_retries: int = 3
+    scraper_retry_backoff_seconds: float = 1.0
+    browser_fallback_enabled: bool = False
+    browser_first_enabled: bool = False
+    selenium_driver_path: str | None = None
+
+    model_config = SettingsConfigDict(
+        env_file=(str(ROOT_ENV_FILE), str(BACKEND_ENV_FILE)),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

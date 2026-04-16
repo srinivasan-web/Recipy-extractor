@@ -1,0 +1,23 @@
+Using the structured recipe JSON below, estimate nutrition only if the recipe already provides enough information to do so reliably.
+
+Rules:
+- Return STRICT JSON only.
+- Do not invent brand-specific values.
+- If nutrition is not stated and cannot be inferred safely, return null.
+
+Return this exact shape:
+{
+  "nutrition": {
+    "calories": null,
+    "protein": null,
+    "carbohydrates": null,
+    "fat": null,
+    "fiber": null,
+    "sugar": null,
+    "sodium": null
+  }
+}
+
+Recipe JSON:
+{recipe_json}
+

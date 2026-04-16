@@ -1,0 +1,22 @@
+Using the structured recipe JSON below, suggest practical ingredient substitutions for common dietary or pantry constraints.
+
+Rules:
+- Return STRICT JSON only.
+- Do not add substitutions for every ingredient unless it is useful.
+- Keep alternatives realistic and culinary-safe.
+- If no meaningful substitutions are available, return an empty array.
+
+Return this exact shape:
+{
+  "substitutions": [
+    {
+      "ingredient": null,
+      "alternatives": [],
+      "notes": null
+    }
+  ]
+}
+
+Recipe JSON:
+{recipe_json}
+

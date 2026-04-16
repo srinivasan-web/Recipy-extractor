@@ -1,0 +1,10 @@
+https://www.allrecipes.com/recipe/24074/alysias-basic-meat-lasagna/
+https://www.simplyrecipes.com/recipes/spaghetti_and_meatballs/
+https://www.bbcgoodfood.com/recipes/easy-pancakes
+
+https://www.allrecipes.com/recipe/24074/alysias-basic-meat-lasagna/
+https://www.simplyrecipes.com/recipes/perfect_guacamole/
+https://www.bbcgoodfood.com/recipes/spaghetti-carbonara
+
+https://www.bbcgoodfood.com/recipes/easy-pancakes
+python -m uvicorn backend.main:app --reload
