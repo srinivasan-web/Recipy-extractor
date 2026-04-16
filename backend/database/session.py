@@ -1,9 +1,11 @@
 from collections.abc import Generator
+import logging
 import shutil
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -15,6 +17,8 @@ except ImportError:  # pragma: no cover - supports running from backend/ as main
 settings = get_settings()
 database_url = normalize_database_url(settings.database_url)
 SQLITE_TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "test_smoke.db"
+FALLBACK_SQLITE_PATH = Path(__file__).resolve().parents[1] / "runtime" / "render_fallback.db"
+logger = logging.getLogger(__name__)
 
 
 def ensure_sqlite_parent_dir(url: str) -> None:
@@ -53,28 +57,38 @@ def bootstrap_sqlite_database(url: str) -> None:
     db_path.touch()
 
 
+def engine_options_for_url(url: str) -> dict:
+    connect_args: dict = {}
+    options = {
+        "future": True,
+        "echo": False,
+        "connect_args": connect_args,
+    }
+
+    if url.startswith("sqlite"):
+        connect_args["check_same_thread"] = False
+        if ":memory:" in url:
+            options["poolclass"] = StaticPool
+        else:
+            ensure_sqlite_parent_dir(url)
+            bootstrap_sqlite_database(url)
+    else:
+        options["pool_pre_ping"] = True
+
+    return options
+
+
+def build_engine(url: str):
+    return create_engine(url, **engine_options_for_url(url))
+
+
 class Base(DeclarativeBase):
     pass
 
 
-connect_args = {}
-engine_options = {
-    "future": True,
-    "echo": False,
-    "connect_args": connect_args,
-}
-
-if database_url.startswith("sqlite"):
-    connect_args["check_same_thread"] = False
-    if ":memory:" in database_url:
-        engine_options["poolclass"] = StaticPool
-    else:
-        ensure_sqlite_parent_dir(database_url)
-        bootstrap_sqlite_database(database_url)
-else:
-    engine_options["pool_pre_ping"] = True
-
-engine = create_engine(database_url, **engine_options)
+engine = build_engine(database_url)
+active_database_url = database_url
+database_fallback_reason: str | None = None
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session)
 
@@ -124,11 +138,52 @@ def reconcile_recipe_schema() -> None:
             )
 
 
+def using_fallback_database() -> bool:
+    return active_database_url != database_url
+
+
+def get_database_status() -> dict[str, str | bool | None]:
+    return {
+        "configured_url": database_url,
+        "active_url": active_database_url,
+        "fallback_active": using_fallback_database(),
+        "fallback_reason": database_fallback_reason,
+    }
+
+
+def activate_sqlite_fallback(reason: Exception) -> None:
+    global engine, SessionLocal, active_database_url, database_fallback_reason
+
+    fallback_url = (
+        normalize_database_url(settings.database_fallback_url)
+        if settings.database_fallback_url
+        else f"sqlite:///{FALLBACK_SQLITE_PATH.as_posix()}"
+    )
+    logger.warning(
+        "Primary database unavailable, switching to fallback database %s. Reason: %s",
+        fallback_url,
+        reason,
+    )
+    engine.dispose()
+    engine = build_engine(fallback_url)
+    SessionLocal.configure(bind=engine)
+    active_database_url = fallback_url
+    database_fallback_reason = str(reason)
+
+
 def init_db() -> None:
     try:
         from ..models.recipe import Recipe  # noqa: F401
     except ImportError:  # pragma: no cover - supports running from backend/ as main:app
         from models.recipe import Recipe  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    reconcile_recipe_schema()
+    try:
+        Base.metadata.create_all(bind=engine)
+        reconcile_recipe_schema()
+    except OperationalError as exc:
+        if database_url.startswith("sqlite") or not settings.database_fallback_enabled:
+            raise
+
+        activate_sqlite_fallback(exc)
+        Base.metadata.create_all(bind=engine)
+        reconcile_recipe_schema()

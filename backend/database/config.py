@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     app_name: str = "Recipe Extractor & Meal Planner API"
     api_prefix: str = "/api"
     database_url: str = DEFAULT_SQLITE_URL
+    database_fallback_enabled: bool = True
+    database_fallback_url: str | None = None
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
     request_timeout_seconds: int = 20

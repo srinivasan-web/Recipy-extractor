@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 try:
-    from ..database.session import get_db
+    from ..database.session import get_database_status, get_db
     from ..models.recipe import Recipe
     from ..schemas.recipe import (
         CuisineBreakdown,
@@ -22,7 +22,7 @@ try:
     from ..services.parser import normalize_recipe_payload
     from ..services.scraper import ScrapedPage, ScraperError, scrape_recipe_page
 except ImportError:  # pragma: no cover - supports running from backend/ as main:app
-    from database.session import get_db
+    from database.session import get_database_status, get_db
     from models.recipe import Recipe
     from schemas.recipe import (
         CuisineBreakdown,
@@ -93,7 +93,12 @@ def health_check(db: Session = Depends(get_db)) -> dict[str, str]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Database health check failed: {exc}",
         ) from exc
-    return {"status": "ok", "database": "connected"}
+    database_status = get_database_status()
+    return {
+        "status": "ok",
+        "database": "connected",
+        "database_mode": "fallback-sqlite" if database_status["fallback_active"] else "primary",
+    }
 
 
 @router.get("/dashboard", response_model=DashboardOverview)

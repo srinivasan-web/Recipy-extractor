@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
 
 
 def clear_backend_modules() -> None:
@@ -72,12 +73,18 @@ class DummyScrapedPage:
 
 class BackendEndToEndTests(unittest.TestCase):
     def setUp(self) -> None:
+        if self._testMethodName == "test_startup_falls_back_to_sqlite_when_primary_database_is_unreachable":
+            self.client = None
+            return
         self.client = load_test_client("sqlite+pysqlite:///:memory:")
         self.client.__enter__()
 
     def tearDown(self) -> None:
-        self.client.__exit__(None, None, None)
+        if self.client is not None:
+            self.client.__exit__(None, None, None)
         os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("DATABASE_FALLBACK_ENABLED", None)
+        os.environ.pop("DATABASE_FALLBACK_URL", None)
         clear_backend_modules()
 
     def test_health_check_and_empty_history(self) -> None:
@@ -221,6 +228,32 @@ class BackendEndToEndTests(unittest.TestCase):
         self.assertEqual(search_results[0]["title"], "Tomato Pasta")
         self.assertIn("summary", search_results[0])
         self.assertIn("image_url", search_results[0])
+
+    def test_startup_falls_back_to_sqlite_when_primary_database_is_unreachable(self) -> None:
+        os.environ["DATABASE_URL"] = "postgresql://user:pass@db.example.com:5432/recipes"
+        os.environ["DATABASE_FALLBACK_ENABLED"] = "true"
+        os.environ["DATABASE_FALLBACK_URL"] = "sqlite+pysqlite:///:memory:"
+        clear_backend_modules()
+
+        backend_session = importlib.import_module("backend.database.session")
+        backend_main = importlib.import_module("backend.main")
+        original_create_all = backend_session.Base.metadata.create_all
+
+        def flaky_create_all(*args, **kwargs):
+            if not backend_session.using_fallback_database():
+                raise OperationalError(
+                    "SELECT 1",
+                    {},
+                    Exception("Network is unreachable"),
+                )
+            return original_create_all(*args, **kwargs)
+
+        with patch.object(backend_session.Base.metadata, "create_all", side_effect=flaky_create_all):
+            with TestClient(backend_main.app) as client:
+                response = client.get("/api/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["database_mode"], "fallback-sqlite")
 
 
 if __name__ == "__main__":
