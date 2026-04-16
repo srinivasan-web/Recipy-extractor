@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+import math
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_unavailable_retries: int = 6
     llm_retry_backoff_seconds: float = 1.0
+    llm_best_effort_enrichment: bool = True
     scraper_max_retries: int = 3
     scraper_retry_backoff_seconds: float = 1.0
     browser_fallback_enabled: bool = False

@@ -23,6 +23,14 @@ class LLMServiceTests(unittest.TestCase):
         self.assertTrue(llm.is_model_permission_error(error))
         self.assertFalse(llm.is_model_temporarily_unavailable(error))
 
+    def test_detects_quota_error_and_retry_delay(self) -> None:
+        llm = importlib.import_module("backend.services.llm")
+        error = Exception(
+            "429 RESOURCE_EXHAUSTED. Quota exceeded. Please retry in 33.488487903s."
+        )
+        self.assertTrue(llm.is_model_quota_error(error))
+        self.assertEqual(llm.extract_retry_after_seconds(error), 34)
+
     @patch("backend.services.llm.sleep_for_retry")
     @patch("backend.services.llm.build_model")
     @patch(
@@ -76,6 +84,22 @@ class LLMServiceTests(unittest.TestCase):
         self.assertEqual(result["title"], "Soup")
         self.assertEqual(mock_invoke_with_model.call_args_list[0].args[1], "gemini-2.5-flash")
         self.assertEqual(mock_invoke_with_model.call_args_list[1].args[1], "gemini-1.5-flash")
+
+    @patch(
+        "backend.services.llm.get_settings",
+        return_value=SimpleNamespace(llm_best_effort_enrichment=True),
+    )
+    @patch("backend.services.llm.invoke_json_prompt")
+    def test_best_effort_enrichment_skips_temporary_failures(self, mock_invoke_json_prompt, _settings) -> None:
+        llm = importlib.import_module("backend.services.llm")
+        mock_invoke_json_prompt.side_effect = llm.LLMQuotaExceededError(
+            "Gemini quota is exhausted for model 'gemini-2.5-flash'.",
+            retry_after_seconds=34,
+        )
+
+        result = llm.invoke_optional_json_prompt("nutrition.txt", recipe_json="{}")
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

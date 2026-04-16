@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,12 @@ class LLMServiceError(RuntimeError):
 
 class LLMTemporaryServiceError(LLMServiceError):
     pass
+
+
+class LLMQuotaExceededError(LLMTemporaryServiceError):
+    def __init__(self, message: str, retry_after_seconds: int | None = None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 def load_prompt(name: str) -> str:
@@ -71,12 +79,38 @@ def is_model_temporarily_unavailable(error: Exception) -> bool:
         or "unavailable" in message
         or "high demand" in message
         or "overloaded" in message
+        or is_model_quota_error(error)
     )
 
 
 def is_model_permission_error(error: Exception) -> bool:
     message = str(error).lower()
     return "permission_denied" in message or "api key was reported as leaked" in message
+
+
+def is_model_quota_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return (
+        "429" in message
+        or "resource_exhausted" in message
+        or "quota exceeded" in message
+        or "rate limit" in message
+        or "please retry in" in message
+    )
+
+
+def extract_retry_after_seconds(error: Exception) -> int | None:
+    message = str(error)
+    patterns = [
+        r"retry in\s+([0-9]+(?:\.[0-9]+)?)s",
+        r"'retryDelay':\s*'([0-9]+)s'",
+        r'"retryDelay":\s*"([0-9]+)s"',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            return max(1, math.ceil(float(match.group(1))))
+    return None
 
 
 def retry_limit_for_error(error: Exception, settings) -> int:
@@ -87,6 +121,28 @@ def retry_limit_for_error(error: Exception, settings) -> int:
 
 def sleep_for_retry(attempt: int, base_backoff_seconds: float) -> None:
     time.sleep(base_backoff_seconds * (2 ** (attempt - 1)))
+
+
+def sleep_for_error(error: Exception, attempt: int, base_backoff_seconds: float) -> None:
+    retry_after_seconds = extract_retry_after_seconds(error)
+    if retry_after_seconds is not None:
+        time.sleep(retry_after_seconds)
+        return
+    sleep_for_retry(attempt, base_backoff_seconds)
+
+
+def build_quota_error(model_name: str, error: Exception) -> LLMQuotaExceededError:
+    retry_after_seconds = extract_retry_after_seconds(error)
+    message = (
+        f"Gemini quota is exhausted for model '{model_name}'. "
+        "Please retry later, use a fallback model, or increase API quota."
+    )
+    if retry_after_seconds is not None:
+        message = (
+            f"Gemini quota is exhausted for model '{model_name}'. "
+            f"Please retry in about {retry_after_seconds} seconds, use a fallback model, or increase API quota."
+        )
+    return LLMQuotaExceededError(message, retry_after_seconds=retry_after_seconds)
 
 
 def invoke_with_model(prompt: str, model_name: str) -> dict[str, Any]:
@@ -111,10 +167,12 @@ def invoke_with_model(prompt: str, model_name: str) -> dict[str, Any]:
                 break
             if attempt >= max_attempts:
                 break
-            sleep_for_retry(attempt, settings.llm_retry_backoff_seconds)
+            sleep_for_error(exc, attempt, settings.llm_retry_backoff_seconds)
 
     if isinstance(last_error, LLMParsingError):
         raise LLMServiceError(str(last_error)) from last_error
+    if last_error and is_model_quota_error(last_error):
+        raise build_quota_error(model_name, last_error) from last_error
     if last_error and is_model_temporarily_unavailable(last_error):
         raise LLMTemporaryServiceError(
             f"Gemini is temporarily unavailable for model '{model_name}'. Please retry shortly."
@@ -155,7 +213,18 @@ def validate_recipe_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     return validated.model_dump(mode="json")
 
 
+def invoke_optional_json_prompt(prompt_name: str, **variables: str) -> dict[str, Any] | None:
+    settings = get_settings()
+    try:
+        return invoke_json_prompt(prompt_name, **variables)
+    except LLMTemporaryServiceError:
+        if settings.llm_best_effort_enrichment:
+            return None
+        raise
+
+
 def extract_recipe_bundle(recipe_text: str) -> dict[str, Any]:
+    settings = get_settings()
     truncated_text = recipe_text[:MAX_SOURCE_CHARS]
 
     recipe_payload = invoke_json_prompt(
@@ -165,12 +234,23 @@ def extract_recipe_bundle(recipe_text: str) -> dict[str, Any]:
     normalized_recipe = validate_recipe_bundle(normalize_recipe_payload(recipe_payload))
     recipe_json = json.dumps(normalized_recipe, ensure_ascii=False, indent=2)
 
-    nutrition_payload = invoke_json_prompt("nutrition.txt", recipe_json=recipe_json)
-    substitutions_payload = invoke_json_prompt("substitutions.txt", recipe_json=recipe_json)
-    shopping_payload = invoke_json_prompt("shopping_list.txt", recipe_json=recipe_json)
+    nutrition_payload = invoke_optional_json_prompt("nutrition.txt", recipe_json=recipe_json)
+    substitutions_payload = invoke_optional_json_prompt("substitutions.txt", recipe_json=recipe_json)
+    shopping_payload = invoke_optional_json_prompt("shopping_list.txt", recipe_json=recipe_json)
 
-    normalized_recipe["nutrition"] = nutrition_payload.get("nutrition")
-    normalized_recipe["substitutions"] = substitutions_payload.get("substitutions", [])
-    normalized_recipe["shopping_list"] = shopping_payload.get("shopping_list", [])
+    if nutrition_payload is not None:
+        normalized_recipe["nutrition"] = nutrition_payload.get("nutrition")
+    elif settings.llm_best_effort_enrichment:
+        normalized_recipe["nutrition"] = normalized_recipe.get("nutrition")
+
+    if substitutions_payload is not None:
+        normalized_recipe["substitutions"] = substitutions_payload.get("substitutions", [])
+    elif settings.llm_best_effort_enrichment:
+        normalized_recipe["substitutions"] = normalized_recipe.get("substitutions", [])
+
+    if shopping_payload is not None:
+        normalized_recipe["shopping_list"] = shopping_payload.get("shopping_list", [])
+    elif settings.llm_best_effort_enrichment:
+        normalized_recipe["shopping_list"] = normalized_recipe.get("shopping_list", [])
 
     return validate_recipe_bundle(normalized_recipe)
